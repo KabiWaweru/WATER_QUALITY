@@ -18,44 +18,11 @@ DallasTemperature Sensor(&Sensor_Bus);
 const int numVar = 100;
 
 // Variables for Turbidity Values
-float tbdVol[numVar];
-float tbdvolSum = 0;
-float tbdvolAvg;
 float tbdCalibVal;
-float tbdBuff;
 float relativeVal;
-float prevVal = 0;
 
-// Variables for Turbidity Outliers
-float medianBuff[numVar];
-float modZscore[numVar];
-float medianVal;
-float medianDeviation;
-int nonOutlierCount = 0;
-int outlierCount = 0;
-float tbdmeansum = 0;
-float tbdavg;
-float meanBuff[numVar];
-float tbdmeanD;
-
-// Variables for TDS Values
-float volVal[numVar];
-float tdsBuff;
-float tdsvolSum = 0;
-float tdsvolAvg;
+// Variable for TDS Values
 float tdsValue;
-float tempComp;
-float volComp;
-float tdsMedian;
-float tdsMedBuff[numVar];
-float tdsMAD;
-float tdsZScore[numVar];
-float tdsOutlier = 0;
-float tdsNonOutlier = 0;
-float tdsmeansum = 0;
-float tdsavg;
-float tdsMeanBuff[numVar];
-float tdsMeanD;
 
 // Variable for Temperature Value
 float TempC;
@@ -65,6 +32,10 @@ float phValue;
 float phValue4;
 float phValue7;
 float phVol;
+
+// Measurement Flags
+int sensorFlag = 1;
+int measurementFlag = 0;
 
 const int WIFI_DELAY = 5000;
 
@@ -96,116 +67,118 @@ void setup()
 void loop()
 {
 
-  if (millis() - Time > publishTime)
+  if ((millis() - Time > publishTime)||(measurementFlag == 0))
   {
-    if (WiFi.status() != WL_CONNECTED)
+    switch (sensorFlag)
     {
-      Serial.print("Attempting to connect.");
-      while (WiFi.status() != WL_CONNECTED)
-      {
-        WiFi.begin(ssid, password);
-        delay(WIFI_DELAY);
-      }
-      Serial.println("\nConnected");
-    }
+      case 1:
+        if(getTemp(TempC))
+        {
+          sensorFlag = 2;
+        }
+        else
+        {
+          sensorFlag = 1;
+        }
+        measurementFlag = 0;
+      break;
+      case 2:
+        if(getPH(phVol,phValue4,phValue7,phValue))
+        {
+          sensorFlag = 3;
+        }
+        else
+        {
+          sensorFlag = 2;
+        }
+        measurementFlag = 0;
+      break;
+      case 3:
+        if(getTDS(tdsValue))
+        {
+          sensorFlag = 4;
+        }
+        else
+        {
+          sensorFlag = 3;
+        }
+      break;
+      case 4:
+        if(getTBD(relativeVal))
+        {
+          //Serial.println("Getting TBD Value");
+          sensorFlag = 1;
+          measurementFlag = 1;
 
-    // Obtaining temperature values
-    Sensor.requestTemperatures();
-    TempC = Sensor.getTempCByIndex(0);
+          if (WiFi.status() != WL_CONNECTED)
+        {
+          Serial.print("Attempting to connect.");
+          while (WiFi.status() != WL_CONNECTED)
+          {
+            WiFi.begin(ssid, password);
+            delay(WIFI_DELAY);
+          }
+          Serial.println("\nConnected");
+        }
+
+          ThingSpeak.setField(1, TempC);
+          ThingSpeak.setField(2, tdsValue);
+          ThingSpeak.setField(3, phValue);
+          ThingSpeak.setField(4, relativeVal);
+
+          int x = ThingSpeak.writeFields(channelNumber, myWriteAPIKey);
+
+          if (x == 200)
+          {
+            Serial.println("Channel update successful");
+          }
+          else
+          {
+            Serial.println("Problem updating channel. HTTP error code" + String(x));
+          }
+        }
+        else
+        {
+          sensorFlag = 4;
+          measurementFlag = 0;
+        }
+      break;
+    }
+    Time = millis();
+  }
+}
+
+bool getTemp(float &tempVal)
+{
+  Sensor.requestTemperatures();
+  TempC = Sensor.getTempCByIndex(0);
+
+  if(TempC < 0 )
+  {
+    Serial.print("Temperature Reading Error");
+    return false;
+  }
+  else
+  {
     Serial.print("The temperature is:");
     Serial.println(TempC);
+    return true;
+  }
+  
+}
 
-    // Obtaining TDS values
-    for (int a = 0; a < 100; a++)
-    {
-      volVal[a] = analogRead(TDS_PIN) * 3.3 / 4095.;
-    }
+bool getPH(float phVol,float phValue4,float phValue7, float &phValue)
+{
+  analogSetPinAttenuation(PH_PIN, ADC_11db);
+  phVol = analogRead(PH_PIN) * (3.3 / 4095.) * 1000.;
 
-    for (int b = 0; b < 100; b++)
-    {
-      tdsmeansum += volVal[b];
-      for (int d = b + 1; d < 100; d++)
-      {
-        if (volVal[d] < volVal[b])
-        {
-          tdsBuff = volVal[d];
-          volVal[d] = volVal[b];
-          volVal[b] = tdsBuff;
-        }
-      }
-    }
-
-    tdsavg = tdsmeansum / numVar;
-    tdsMedian = ((volVal[numVar / 2]) + volVal[(numVar / 2) + 1]) / 2;
-
-    for (int g = 0; g < 100; g++)
-    {
-      tdsMedBuff[g] = abs(volVal[g] - tdsMedian);
-      tdsMeanBuff[g] = abs(volVal[g] - tdsavg);
-    }
-
-    for (int j = 0; j < 100; j++)
-    {
-      for (int k = j + 1; k < 100; k++)
-      {
-        if (tdsMedBuff[k] < tdsMedBuff[j])
-        {
-          tdsBuff = tdsMedBuff[k];
-          tdsMedBuff[k] = tdsMedBuff[j];
-          tdsMedBuff[j] = tdsBuff;
-        }
-        if (tdsMeanBuff[k] < tdsMeanBuff[j])
-        {
-          tdsBuff = tdsMeanBuff[k];
-          tdsMeanBuff[k] = tdsMeanBuff[j];
-          tdsMeanBuff[j] = tdsBuff;
-        }
-      }
-    }
-
-    tdsMAD = ((tdsMedBuff[numVar / 2]) + (tdsMedBuff[(numVar / 2) + 1])) / 2;
-    tdsMeanD = ((tdsMeanBuff[numVar / 2]) + (tdsMeanBuff[(numVar / 2) + 1])) / 2;
-    for (int l = 0; l < 100; l++)
-    {
-      if (tdsMAD == 0)
-      {
-        tdsZScore[l] = (volVal[l] - tdsMedian) / (1.253314 * tdsMeanD);
-      }
-      else if (tdsMAD > 0)
-      {
-        tdsZScore[l] = (volVal[l] - tdsMedian) / (1.486 * tdsMAD);
-      }
-    }
-
-    for (int f = 0; f < 100; f++)
-    {
-      if ((tdsZScore[f] > 1) || (tdsZScore[f] < -1))
-      {
-        volVal[f] = 0;
-        tdsOutlier += 1;
-      }
-      else if ((tdsZScore[f] < 1) && (tdsZScore[f] > -1))
-      {
-        tdsNonOutlier += 1;
-      }
-    }
-
-    for (int g = 0; g < 100; g++)
-    {
-      tdsvolSum += volVal[g];
-    }
-
-    tdsvolAvg = tdsvolSum / tdsNonOutlier;
-    tempComp = 1 + 0.02 * (TempC - 25.);
-    volComp = tdsvolAvg / tempComp;
-    tdsValue = (133.42 * volComp * volComp * volComp - 255.86 * volComp * volComp + 857.39 * volComp) * 0.5;
-    Serial.print("The TDS value is:");
-    Serial.println(tdsValue);
-    Serial.println(tdsmeansum);
-
-    // Obtaining PH values
-    analogSetPinAttenuation(PH_PIN, ADC_11db);
-    phVol = analogRead(PH_PIN) * (3.3 / 4095.) * 1000.;
+  if(phVol == 0)
+  {
+    Serial.print("PH Reading Error");
+    return false;
+  }
+  else
+  {
     float slope = (7.0 - 4.0) / ((phValue7 - 1500.0) / 3.0 - (phValue4 - 1500.0) / 3.0);
     float intercept = 7.0 - slope * (phValue7 - 1500.0) / 3.0;
     phValue = slope * (phVol - 1500.0) / 3.0 + intercept;
@@ -213,138 +186,270 @@ void loop()
     Serial.println(phValue);
     Serial.println(phVol);
 
-    // Obtaining TBD Values
-
-    for (int i = 0; i < 100; i++)
-    {
-      // 5V input voltage
-      // tbdVol[i] = analogRead(TBD_PIN)*(4.5/4095.)*(0.733/0.719);
-      tbdVol[i] = analogRead(TBD_PIN) * (3.3 / 4095.);
-    }
-
-    for (int j = 0; j < 100; j++)
-    {
-      tbdmeansum += tbdVol[j];
-      for (int k = j + 1; k < 100; k++)
-      {
-        if (tbdVol[k] < tbdVol[j])
-        {
-          tbdBuff = tbdVol[k];
-          tbdVol[k] = tbdVol[j];
-          tbdVol[j] = tbdBuff;
-        }
-      }
-    }
-
-    tbdavg = tbdmeansum / numVar;
-    medianVal = (tbdVol[numVar / 2] + tbdVol[(numVar / 2) + 1]) / 2;
-
-    for (int l = 0; l < 100; l++)
-    {
-      medianBuff[l] = abs(tbdVol[l] - medianVal);
-    }
-
-    for (int j = 0; j < 100; j++)
-    {
-      for (int k = j + 1; k < 100; k++)
-      {
-        if (medianBuff[k] < medianBuff[j])
-        {
-          tbdBuff = medianBuff[k];
-          medianBuff[k] = medianBuff[j];
-          medianBuff[j] = tbdBuff;
-        }
-        if (meanBuff[k] < meanBuff[j])
-        {
-          tbdBuff = meanBuff[k];
-          meanBuff[k] = meanBuff[j];
-          meanBuff[j] = tbdBuff;
-        }
-      }
-    }
-
-    medianDeviation = (medianBuff[numVar / 2] + medianBuff[(numVar / 2) + 1]) / 2;
-    tbdmeanD = (meanBuff[numVar / 2] + meanBuff[(numVar / 2) + 1]) / 2;
-
-    for (int l = 0; l < 100; l++)
-    {
-      if (medianDeviation == 0)
-      {
-        modZscore[l] = (tbdVol[l] - medianVal) / (1.253314 * tbdmeanD);
-      }
-      else if (medianDeviation > 0)
-      {
-        modZscore[l] = (tbdVol[l] - medianVal) / (1.486 * medianDeviation);
-      }
-    }
-
-    for (int z = 0; z < 100; z++)
-    {
-      if ((modZscore[z] > 1) || (modZscore[z] < -1))
-      {
-        tbdVol[z] = 0;
-        outlierCount += 1;
-      }
-      else if ((modZscore[z] < 1) && (modZscore[z] > -1))
-      {
-        nonOutlierCount += 1;
-      }
-    }
-
-    for (int y = 0; y < 100; y++)
-    {
-      tbdvolSum += tbdVol[y];
-    }
-
-    tbdvolAvg = tbdvolSum / nonOutlierCount;
-
-    if ((sizeof(tbdVol) / sizeof(tbdVol[0]) != numVar) || (nonOutlierCount == 0) || (tbdvolAvg > tbdCalibVal) )
-    {
-      relativeVal = prevVal;
-    }
-    else
-    {
-      relativeVal = 100. - (tbdvolAvg / tbdCalibVal) * 100.;
-    }
-
-    prevVal = relativeVal;
-
-    Serial.print("The Relative Turbidity is:");
-    Serial.print(relativeVal);
-    Serial.println(" % ");
-    Serial.print("Voltage:");
-    Serial.println(tbdvolAvg);
-    Serial.print("Calibrated Voltage:");
-    Serial.println(tbdCalibVal);
-    Serial.print("Non Outlier:");
-    Serial.println(nonOutlierCount);
-    Serial.print("Outlier:");
-    Serial.println(outlierCount);
-
-    tbdvolSum = 0;
-    tdsvolSum = 0;
-    nonOutlierCount = 0;
-    outlierCount = 0;
-    tdsOutlier = 0;
-    tdsNonOutlier = 0;
-    tdsmeansum = 0;
-    tbdmeansum = 0;
-
-    ThingSpeak.setField(1, TempC);
-    ThingSpeak.setField(2, tdsValue);
-    ThingSpeak.setField(3, phValue);
-    ThingSpeak.setField(4, relativeVal);
-
-    int x = ThingSpeak.writeFields(channelNumber, myWriteAPIKey);
-
-    if (x == 200)
-    {
-      Serial.println("Channel update successful");
-    }
-    else
-    {
-      Serial.println("Problem updating channel. HTTP error code" + String(x));
-    }
-    Time = millis();
+    return true;
   }
 }
+
+bool getTDS(float &tdsValue)
+{
+  float volVal[numVar];
+  for (int a = 0; a < numVar; a++)
+  {
+    volVal[a] = analogRead(TDS_PIN) * 3.3 / 4095.;
+
+    if(volVal[a] == 0)
+    {
+      Serial.print("TDS Reading Error");
+      return false;
+    }
+  }
+
+  // Rearrange Array from Smallest to Largest
+  arrayArrange(volVal,numVar);
+
+  // Mean
+  float tdsSum = getSum(volVal,numVar);
+  float tdsMean = getMean(tdsSum,numVar);
+
+  //Median
+  float tdsMedian = getMedian(volVal, numVar);
+
+  //Median Deviations
+  // Pointer to the Array
+  float *tdsMedianDeviationPointer;
+  tdsMedianDeviationPointer = getMedianDeviations(volVal,tdsMedian,numVar);
+
+  //Mean Deviations
+  // Pointer to the Array
+  float *tdsMeanDeviationPointer;
+  tdsMeanDeviationPointer = getMeanDeviations(volVal,tdsMean,numVar); 
+
+  //Rearrange Median Buff
+  arrayArrange(tdsMedianDeviationPointer,numVar);
+
+  //Rearrange Mean Buff
+  arrayArrange(tdsMeanDeviationPointer,numVar);
+
+  //Find tdsMAD
+  float tdsMAD = getMedian(tdsMedianDeviationPointer,numVar);
+
+  //Find tdsmeanD
+  float tdsMeanD = getMedian(tdsMeanDeviationPointer,numVar);
+
+  //Find Z Score Value
+  // Pointer to Z Score Array
+  float *tdsZScorePointer;
+  tdsZScorePointer = zScore(volVal,tdsMAD,tdsMedian,tdsMeanD,numVar);
+
+  //Find Outlier Count
+  float tdsOutlier = 0;
+  float tdsNonOutlier = 0;
+  outlierCount(tdsZScorePointer,volVal,tdsOutlier,tdsNonOutlier);
+  if((sizeof(volVal)/sizeof(volVal[0]) != numVar)||(tdsNonOutlier == 0))
+  {
+    return false;
+  }
+  else
+  {
+    float tdsvolSum = getSum(volVal,numVar);
+
+    float tdsvolAvg = tdsvolSum / tdsNonOutlier;
+    float tempComp = 1 + 0.02 * (TempC - 25.);
+    float volComp = tdsvolAvg / tempComp;
+    tdsValue = (133.42 * volComp * volComp * volComp - 255.86 * volComp * volComp + 857.39 * volComp) * 0.5;
+    Serial.print("The TDS value is:");
+    Serial.println(tdsValue);
+
+    return true;
+  }
+}
+
+bool getTBD(float &relativeVal)
+{
+  float tbdVol[numVar];
+  for (int i = 0; i < numVar; i++)
+  {
+    // 5V input voltage
+    // tbdVol[i] = analogRead(TBD_PIN)*(4.5/4095.)*(0.733/0.719);
+    tbdVol[i] = analogRead(TBD_PIN) * (3.3 / 4095.);
+
+    if(tbdVol[i] == 0)
+    {
+      Serial.print("TBD Reading Error");
+      return false;
+    }
+  }
+
+  // Rearrange Array from Smallest to Largest
+  arrayArrange(tbdVol,numVar);
+
+  //Mean
+  float tbdSum = getSum(tbdVol, numVar);
+  float tbdMean = getMean(tbdSum,numVar);
+
+  //Median
+  float tbdMedian = getMedian(tbdVol,numVar);
+
+  //Median Deviations
+  //Pointer to Array
+  float * tbdMedianDeviationPointer;
+  tbdMedianDeviationPointer = getMedianDeviations(tbdVol,tbdMedian,numVar);
+
+  //Mean Deviations
+  //Pointer to Array
+  float * tbdMeanDeviationPointer;
+  tbdMeanDeviationPointer = getMeanDeviations(tbdVol,tbdMean,numVar);
+
+  //Rearrange Median Buff
+  arrayArrange(tbdMedianDeviationPointer,numVar);
+
+  //Rearrange Mean Buff
+  arrayArrange(tbdMeanDeviationPointer,numVar);
+
+  //Find tbdMAD
+  float tbdMAD = getMedian(tbdMedianDeviationPointer,numVar);
+
+  //Find tdsmeanD
+  float tbdMeanD = getMedian(tbdMeanDeviationPointer,numVar);
+
+   //Find Z Score Value
+  // Pointer to Z Score Array
+  float *tbdZScorePointer;
+  tbdZScorePointer = zScore(tbdVol,tbdMAD,tbdMedian,tbdMeanD,numVar);
+
+  //Find Outlier Count
+  float tbdOutlier = 0;
+  float tbdNonOutlier = 0;
+  outlierCount(tbdZScorePointer,tbdVol,tbdOutlier,tbdNonOutlier);
+
+  if(((sizeof(tbdVol))/sizeof(tbdVol[0]) != numVar)||(tbdNonOutlier == 0))
+  {
+    Serial.println("TBD Reading Error");
+    return false;
+  }
+  else
+  {
+    float tbdvolSum = getSum(tbdVol,numVar);
+
+    float tbdvolAvg = tbdvolSum/tbdNonOutlier;
+    if(tbdvolAvg > tbdCalibVal)
+    {
+      Serial.print("TBD Reading Error");
+      return false;
+    }
+    else
+    {
+      relativeVal = 100. - (tbdvolAvg/tbdCalibVal) * 100.;
+      Serial.print("The Relative Turbidity is:");
+      Serial.print(relativeVal);
+      Serial.println(" % ");
+      //Serial.print("Voltage:");
+      //Serial.println(tbdvolAvg);
+      //Serial.print("Calibrated Voltage:");
+      //Serial.println(tbdCalibVal);
+      //Serial.print("Non Outlier:");
+      //Serial.println(tbdOutlier);
+      //Serial.print("Outlier:");
+      //Serial.println(tbdNonOutlier);
+
+      return true;
+    }
+  }
+}
+
+void arrayArrange(float array[], const int size)
+{
+  float arrayBuff;
+
+  for (int f = 0; f < size; f++)
+  {
+    for (int d = f + 1; d < size; d++)
+    {
+      if (array[d] < array[f])
+      {
+        arrayBuff = array[d];
+        array[d] = array[f];
+        array[f] = arrayBuff;
+      }
+      }
+  }
+}
+
+float getSum(float voltage[], const int size)
+{
+  float sum = 0;
+
+  for(int b = 0; b < size; b++)
+  {
+    sum += voltage[b];
+  }
+
+  return sum;
+}
+
+float getMean(float sum, const int size)
+{
+  float avg = sum / size;
+  return avg;
+}
+
+float getMedian(float array[], const int size)
+{
+  float medianVal = ((array[size / 2]) + array[(size / 2) + 1]) / 2;
+  return medianVal;
+}
+
+float * getMedianDeviations(float volArray[], float medianVal, const int size)
+{
+  static float medBuff[numVar];
+  for(int g = 0; g<size; g++)
+  {
+    medBuff[g] = abs(volArray[g] - medianVal);
+  }
+  return medBuff;
+}
+
+float * getMeanDeviations(float volArray[], float meanVal, const int size)
+{
+  static float meanBuff[numVar];
+  for(int j = 0; j < numVar; j++)
+  {
+    meanBuff[j] = abs(volArray[j] - meanVal);
+  }
+  return meanBuff;
+}
+
+float * zScore(float volArray[],float medianDeviationVal, float medianVal,float meanDeviationVal, const int size)
+{
+  static float tdsZScore[numVar];
+  for (int l = 0; l < size; l++)
+  {
+    if (medianDeviationVal == 0)
+    {
+      tdsZScore[l] = (volArray[l] - medianVal) / (1.253314 * meanDeviationVal);
+    }
+    else if (medianDeviationVal > 0)
+    {
+      tdsZScore[l] = (volArray[l] - medianVal) / (1.486 * medianDeviationVal);
+    }
+  }
+  return tdsZScore;
+}
+
+void outlierCount(float zScoreArray[],float volArray[],float &outlier, float &nonOutlier)
+{
+  for (int l = 0; l < numVar; l++)
+    {
+      if ((zScoreArray[l] > 1) || (zScoreArray[l] < -1))
+      {
+        volArray[l] = 0;
+        outlier += 1;
+      }
+      else if ((zScoreArray[l] < 1) && (zScoreArray[l] > -1))
+      {
+        nonOutlier += 1;
+      }
+    }
+}
+
+
