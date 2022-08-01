@@ -9,7 +9,7 @@
 Preferences storage;
 
 const int BUS_PIN = D1;
-const int TDS_PIN = A0;
+const int TDS_PIN = 34;
 const int PH_PIN = 39;
 const int TBD_PIN = 35;
 OneWire Sensor_Bus(BUS_PIN);
@@ -94,7 +94,7 @@ void loop()
         measurementFlag = 0;
       break;
       case 3:
-        if(getTDS(tdsValue))
+        if(getTDS(tdsValue,TempC))
         {
           sensorFlag = 4;
         }
@@ -151,9 +151,9 @@ void loop()
 bool getTemp(float &tempVal)
 {
   Sensor.requestTemperatures();
-  TempC = Sensor.getTempCByIndex(0);
+  tempVal = Sensor.getTempCByIndex(0);
 
-  if(TempC < 0 )
+  if(tempVal < 0 )
   {
     Serial.print("Temperature Reading Error");
     return false;
@@ -161,7 +161,7 @@ bool getTemp(float &tempVal)
   else
   {
     Serial.print("The temperature is:");
-    Serial.println(TempC);
+    Serial.println(tempVal);
     return true;
   }
   
@@ -190,7 +190,7 @@ bool getPH(float phVol,float phValue4,float phValue7, float &phValue)
   }
 }
 
-bool getTDS(float &tdsValue)
+bool getTDS(float &tdsValue, float tempVal)
 {
   float volVal[numVar];
   for (int a = 0; a < numVar; a++)
@@ -254,7 +254,7 @@ bool getTDS(float &tdsValue)
     float tdsvolSum = getSum(volVal,numVar);
 
     float tdsvolAvg = tdsvolSum / tdsNonOutlier;
-    float tempComp = 1 + 0.02 * (TempC - 25.);
+    float tempComp = 1 + 0.02 * (tempVal - 25.);
     float volComp = tdsvolAvg / tempComp;
     tdsValue = (133.42 * volComp * volComp * volComp - 255.86 * volComp * volComp + 857.39 * volComp) * 0.5;
     Serial.print("The TDS value is:");
