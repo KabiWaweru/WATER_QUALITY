@@ -60,8 +60,6 @@ void setup()
   storage.begin("phValues", false);
   phValue7 = storage.getFloat("neutralVoltage", 0.0);
   phValue4 = storage.getFloat("acidVoltage", 0.0);
-  storage.putFloat("TBD",2.15);
-  tbdCalibVal = storage.getFloat("TBD", 0.0);
 }
 
 void loop()
@@ -104,7 +102,7 @@ void loop()
         }
       break;
       case 4:
-        if(getTBD(relativeVal))
+        if(getTBD(relativeVal,TempC))
         {
           //Serial.println("Getting TBD Value");
           sensorFlag = 1;
@@ -264,18 +262,18 @@ bool getTDS(float &tdsValue, float tempVal)
   }
 }
 
-bool getTBD(float &relativeVal)
+bool getTBD(float &relativeVal, float TempC)
 {
   float tbdVol[numVar];
   for (int i = 0; i < numVar; i++)
   {
     // 5V input voltage
-    // tbdVol[i] = analogRead(TBD_PIN)*(4.5/4095.)*(0.733/0.719);
+    //tbdVol[i] = analogRead(TBD_PIN)*(4.5/4095.)*(0.733/0.719);
     tbdVol[i] = analogRead(TBD_PIN) * (3.3 / 4095.);
 
     if(tbdVol[i] == 0)
     {
-      Serial.print("TBD Reading Error");
+      Serial.print("TBD Reading is 0");
       return false;
     }
   }
@@ -317,6 +315,13 @@ bool getTBD(float &relativeVal)
   float *tbdZScorePointer;
   tbdZScorePointer = zScore(tbdVol,tbdMAD,tbdMedian,tbdMeanD,numVar);
 
+  // The analog voltage decreases with inreasing temperature
+  // Equation of a straight line was obtained by measurinf the 
+  // analog output voltage in pure water at different values
+  // we will use this to also vary the calibrated value to ensure
+  // stability
+  tbdCalibVal = - 0.01088 * TempC + 2.439;
+  
   //Find Outlier Count
   float tbdOutlier = 0;
   float tbdNonOutlier = 0;
@@ -334,7 +339,7 @@ bool getTBD(float &relativeVal)
     float tbdvolAvg = tbdvolSum/tbdNonOutlier;
     if(tbdvolAvg > tbdCalibVal)
     {
-      Serial.print("TBD Reading Error");
+      Serial.print("Vol greater than calib val");
       return false;
     }
     else
